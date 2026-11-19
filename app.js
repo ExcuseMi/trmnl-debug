@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
+const PAGE_VERSION = "3 (strap fix, serial monitor)";
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.7.0/bundle.js";
-import { USB_FILTERS, CHIPS, ESPRESSIF_VID, USB_JTAG_PID, describeUsb, disableWatchdogs, resetToApp } from "./chips.js";
+import { USB_FILTERS, CHIPS, ESPRESSIF_VID, USB_JTAG_PID, describeUsb, disableWatchdogs, resetToApp } from "./chips.js?v=3";
 
 const $ = (id) => document.getElementById(id);
 const logEl = $("log");
@@ -216,5 +217,5 @@ if (!("serial" in navigator)) {
     setButtons();
   });
   setButtons();
-  log("Ready. Connect a TRMNL with a USB data cable.");
+  log(`Ready (page version ${PAGE_VERSION}). Connect a TRMNL with a USB data cable.`);
 }
