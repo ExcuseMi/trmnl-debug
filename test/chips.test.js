@@ -7,6 +7,7 @@ import { resetToApp, disableWatchdogs, describeUsb } from "../chips.js";
 // w = write [addr, value, mask], r = read addr, s = sleep ms.
 const F = 0xffffffff;
 const WDT = (wprotect, config1, config0) => [
+  ["release"],
   ["w", wprotect, 0x50d83aa1, F],
   ["w", config1, 2000, F],
   ["w", config0, 0xd0000102, F],
@@ -33,13 +34,15 @@ const EXPECTED_DISABLE = {
   ],
 };
 
-// regs: values readReg returns. Default: GPIO0 high (SPI boot bit set), force download clear, SWD conf 5.
+// regs: values readReg returns. Default: GPIO_STRAP 0x1 as read on a stuck X in download mode (GPIO0 low,
+// SPI boot bit 3 clear), force download clear, SWD conf 5.
 function fakeLoader({ failAt = -1, regs = {} } = {}) {
   const ops = [];
-  const values = { 0x60004038: 0x8, 0x6000812c: 0, 0x600080b4: 5, 0x600080ac: 5, ...regs };
+  const values = { 0x60004038: 0x1, 0x6000812c: 0, 0x600080b4: 5, 0x600080ac: 5, ...regs };
   return {
     ops,
     sleep: async (ms) => ops.push(["s", ms]),
+    release: async () => ops.push(["release"]),
     async readReg(addr) {
       ops.push(["r", addr]);
       return values[addr] ?? 0;
@@ -50,7 +53,7 @@ function fakeLoader({ failAt = -1, regs = {} } = {}) {
     },
   };
 }
-const run = (l, chip) => resetToApp(l, chip, () => {}, l.sleep);
+const run = (l, chip) => resetToApp(l, chip, () => {}, l.sleep, l.release);
 
 for (const chip of Object.keys(EXPECTED_RESET)) {
   test(`${chip}: reset traffic in order`, async () => {
@@ -75,8 +78,12 @@ for (const chip of Object.keys(EXPECTED_RESET)) {
   });
 }
 
-test("ESP32-S3: GPIO0 strapped low falls back to hard reset, no WDT writes", async () => {
-  const l = fakeLoader({ regs: { 0x60004038: 0 } });
+test("ESP32-S3: GPIO_STRAP 0x1 (GPIO0 low) takes the watchdog path", async () => {
+  assert.equal(await run(fakeLoader({ regs: { 0x60004038: 0x1 } }), "ESP32-S3"), "watchdog");
+});
+
+test("ESP32-S3: GPIO0 high (strap bit 3 set) falls back to hard reset, no WDT writes", async () => {
+  const l = fakeLoader({ regs: { 0x60004038: 0x9 } });
   assert.equal(await run(l, "ESP32-S3"), "hard");
   assert.equal(l.ops.filter((o) => o[0] === "w").length, 1);
 });

@@ -17,12 +17,17 @@
     <button id="detect" disabled>Detect</button>
     <button id="reset" disabled>Watchdog reset</button>
     <button id="bootlog" disabled>Read boot log</button>
+    <button id="monitor" disabled>Serial monitor</button>
+    <button id="monitorstop" disabled>Stop</button>
   </div>
   <p id="found" class="found">No device chosen.</p>
   <ul class="help">
     <li><b>Detect</b>: enters the ROM bootloader, reads chip and MAC, then watchdog-resets back to the app.</li>
     <li><b>Watchdog reset</b>: enters the ROM bootloader and watchdog-resets the chip.</li>
     <li><b>Read boot log</b>: reads the serial port for 8 s (if the port came back late).</li>
+    <li><b>Serial monitor</b>: shows everything the device sends until Stop. Normal boot:
+      <code>boot:0x8 (SPI_FAST_FLASH_BOOT)</code> then app lines. Stuck in the ROM: <code>boot:0x.. (DOWNLOAD...)</code>
+      and <code>waiting for download</code>. Nothing at all after a reset: the app is hung, or the port is held by another program.</li>
     <li><b>Not found?</b> Put the device in flashing mode by hand: <a href="https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode#h_96e07a072e">TRMNL's guide</a>.</li>
   </ul>
   <p class="safety">Safe by design: this page never writes or erases flash and never touches eFuses. It only reads

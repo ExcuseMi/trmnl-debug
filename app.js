@@ -28,6 +28,55 @@ function setButtons() {
   $("detect").disabled = busy || !port;
   $("reset").disabled = busy || !port;
   $("bootlog").disabled = busy || !port;
+  $("monitor").disabled = busy || !port;
+  $("monitorstop").disabled = !monitor;
+}
+
+// Plain serial monitor: show everything that arrives until Stop.
+let monitor = null;
+const BOOT_DL = /boot:0x\w+ \(DOWNLOAD/i;
+const BOOT_OK = /boot:0x\w+ \(SPI_FAST_FLASH_BOOT\)/i;
+async function startMonitor() {
+  busy = true;
+  try {
+    await port.open({ baudRate: 115200 });
+  } catch (err) {
+    busy = false;
+    setButtons();
+    log(`Monitor: cannot open the port (${err.message})`, "warn");
+    return;
+  }
+  const reader = port.readable.getReader();
+  monitor = { reader };
+  setButtons();
+  log("Monitor: open at 115200. Stop to end.", "ok");
+  const dec = new TextDecoder();
+  let pending = "";
+  const show = (l) => {
+    if (!l.trim()) return;
+    const cls = BOOT_DL.test(l) ? "warn" : BOOT_OK.test(l) || /rst:0x\w+ \(RTC_?WDT/i.test(l) ? "ok" : "boot";
+    log(`| ${l}`, cls);
+    if (BOOT_DL.test(l)) log("The chip booted into DOWNLOAD mode (ROM bootloader), not the app.", "warn");
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += dec.decode(value, { stream: true });
+      const parts = pending.split(/\r?\n/);
+      pending = parts.pop();
+      parts.forEach(show);
+    }
+  } catch (err) {
+    log(`Monitor: port closed (${err.message})`, "warn");
+  }
+  show(pending);
+  reader.releaseLock();
+  await port.close().catch(() => {});
+  monitor = null;
+  busy = false;
+  setButtons();
+  log("Monitor stopped.");
 }
 
 async function connect() {
@@ -132,7 +181,8 @@ async function run(withDetails) {
       await disableWatchdogs(loader, chip, log);
     }
     log("Leaving the bootloader: clear force-download, then RTC watchdog reset...");
-    if ((await resetToApp(loader, chip, log)) === "hard") {
+    const release = () => transport.setSignals(false, false);
+    if ((await resetToApp(loader, chip, log, undefined, release)) === "hard") {
       log("Falling back to the RTS hard reset.", "warn");
       await loader.after("hard_reset");
     }
@@ -156,6 +206,8 @@ if (!("serial" in navigator)) {
   $("connect").addEventListener("click", connect);
   $("detect").addEventListener("click", () => run(true));
   $("reset").addEventListener("click", () => run(false));
+  $("monitor").addEventListener("click", startMonitor);
+  $("monitorstop").addEventListener("click", () => monitor && monitor.reader.cancel().catch(() => {}));
   $("bootlog").addEventListener("click", async () => {
     busy = true;
     setButtons();

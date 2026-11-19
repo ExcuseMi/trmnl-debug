@@ -9,6 +9,7 @@ A static web page that finds a TRMNL over USB and restarts it with an RTC watchd
 | Detect | ROM bootloader (esptool-js reset), chip name and MAC, then watchdog reset back to the app |
 | Watchdog reset | ROM bootloader, then watchdog reset |
 | Read boot log | Read the serial port for 8 s |
+| Serial monitor / Stop | Show everything the device sends; marks `boot:0x.. (DOWNLOAD...)` |
 
 After a reset the page reads the serial port for a few seconds and shows the boot lines; `rst:0x10 (RTCWDT_RTC_RST)`
 confirms the reset kind.
@@ -25,8 +26,9 @@ Order, as esptool 5.x does it:
 1. After connect (USB Serial/JTAG only): RTC WDT off (unlock, CONFIG0 = 0, lock); super watchdog auto-feed
    (SWD_WPROTECT = 0x8F1D312A, SWD_CONF bit 31, lock). S3: 0x600080B8/B4, C3: 0x600080B0/AC.
 2. S3 only: clear FORCE_DOWNLOAD_BOOT (OPTION1 0x6000812C, mask 0x1), else the chip boots into download mode again.
-   If GPIO0 is strapped low (GPIO_STRAP 0x60004038 bit 3 clear) or the bit stays set: RTS hard reset instead.
-3. WPROTECT = 0x50D83AA1 (unlock), CONFIG1 = 2000, CONFIG0 = 0xD0000102 (enable, stage 0 resets the chip),
+   Watchdog only when GPIO_STRAP (0x60004038) bit 3 is clear (GPIO0 low, as after the USB reset into download
+   mode) and the bit stays clear, as in esptool's hard_reset; otherwise RTS hard reset.
+3. Drop DTR and RTS, then WPROTECT = 0x50D83AA1 (unlock), CONFIG1 = 2000, CONFIG0 = 0xD0000102 (enable, stage 0 resets the chip),
    WPROTECT = 0 (lock), wait 0.5 s.
 4. Reopen the port (same VID:PID) and read the boot log for 8 s; "Read boot log" repeats that.
 

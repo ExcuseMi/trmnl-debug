@@ -32,7 +32,7 @@ const FULL = 0xffffffff;
 
 // RTC_CNTL registers per chip (ESP32-S3/C3 technical reference and esptool's target tables).
 // forceDl: OPTION1 FORCE_DOWNLOAD_BOOT, must be cleared or the chip boots into download mode again.
-// strap: GPIO_STRAP_REG and its SPI boot bit (0 = GPIO0 low = download mode strapped).
+// strap: GPIO_STRAP_REG and its SPI boot bit (0 = GPIO0 low, as after the USB-JTAG reset into download mode).
 export const CHIPS = {
   "ESP32-S3": {
     config0: 0x60008098, config1: 0x6000809c, wprotect: 0x600080b0,
@@ -73,19 +73,25 @@ export async function disableWatchdogs(loader, chipName, log = () => {}) {
 }
 
 // Leave the ROM bootloader into the app. Returns "watchdog" when the RTC WDT reset was armed,
-// "hard" when the caller must fall back to the RTS hard reset (download mode still forced or strapped).
-export async function resetToApp(loader, chipName, log = () => {}, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+// "hard" when the caller must fall back to the RTS hard reset. S3 follows esptool's hard_reset literally:
+// watchdog only when GPIO0 reads low (strap & SPI_BOOT == 0) and force download is clear.
+// release(): drops DTR and RTS just before the watchdog is armed, so the USB-JTAG bridge does not hold
+// the chip in download mode across the reset.
+export async function resetToApp(loader, chipName, log = () => {}, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  release = async () => {}) {
   const c = chipOrThrow(chipName);
   if (c.forceDl) {
     await write(loader, log, c.forceDl.reg, 0, c.forceDl.mask); // clear force download boot
     const strap = (await loader.readReg(c.strap.reg)) >>> 0;
     const force = (await loader.readReg(c.forceDl.reg)) >>> 0;
     log(`GPIO_STRAP ${hex(strap)}, OPTION1 ${hex(force)}`);
-    if ((strap & c.strap.spiBootMask) === 0 || (force & c.forceDl.mask) !== 0) {
-      log("Download mode still strapped or forced: watchdog reset skipped.");
+    if ((strap & c.strap.spiBootMask) !== 0 || (force & c.forceDl.mask) !== 0) {
+      log("GPIO0 high or force download still set: watchdog reset skipped (esptool does the same).");
       return "hard";
     }
   }
+  log("Releasing DTR and RTS");
+  await release();
   await write(loader, log, c.wprotect, WDT_WKEY); // unlock
   await write(loader, log, c.config1, WDT_TIMEOUT); // timeout
   await write(loader, log, c.config0, WDT_ENABLE); // enable with RTC reset
