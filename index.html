@@ -16,15 +16,17 @@
     <button id="connect">Connect</button>
     <button id="detect" disabled>Detect</button>
     <button id="reset" disabled>Watchdog reset</button>
+    <button id="bootlog" disabled>Read boot log</button>
   </div>
   <p id="found" class="found">No device chosen.</p>
   <ul class="help">
     <li><b>Detect</b>: enters the ROM bootloader, reads chip and MAC, then watchdog-resets back to the app.</li>
     <li><b>Watchdog reset</b>: enters the ROM bootloader and watchdog-resets the chip.</li>
+    <li><b>Read boot log</b>: reads the serial port for 8 s (if the port came back late).</li>
     <li><b>Not found?</b> Put the device in flashing mode by hand: <a href="https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode#h_96e07a072e">TRMNL's guide</a>.</li>
   </ul>
   <p class="safety">Safe by design: this page never writes or erases flash and never touches eFuses. It only reads
-    chip registers and writes the four RTC watchdog registers.</p>
+    chip registers and writes the RTC watchdog, super watchdog and force-download-boot registers.</p>
   <h2>Log</h2>
   <div id="log" aria-live="polite"></div>
   <footer>MIT. Uses <a href="https://github.com/espressif/esptool-js">esptool-js</a> 0.7.0 (Apache-2.0, vendored).</footer>

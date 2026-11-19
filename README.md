@@ -8,6 +8,7 @@ A static web page that finds a TRMNL over USB and restarts it with an RTC watchd
 | Connect | Port picker for Espressif native USB (303a), CH340 (1a86), CP210x (10c4); shows VID:PID and board guess |
 | Detect | ROM bootloader (esptool-js reset), chip name and MAC, then watchdog reset back to the app |
 | Watchdog reset | ROM bootloader, then watchdog reset |
+| Read boot log | Read the serial port for 8 s |
 
 After a reset the page reads the serial port for a few seconds and shows the boot lines; `rst:0x10 (RTCWDT_RTC_RST)`
 confirms the reset kind.
@@ -19,8 +20,17 @@ confirms the reset kind.
 | ESP32-S3 (X) | 0x600080B0 | 0x6000809C | 0x60008098 |
 | ESP32-C3 (OG) | 0x600080A8 | 0x60008094 | 0x60008090 |
 
-Writes in order: WPROTECT = 0x50D83AA1 (unlock), CONFIG1 = 2000 (timeout), CONFIG0 = 0xD0000102 (enable, stage 0
-resets the chip), WPROTECT = 0 (lock). Other chips: the page says so and writes nothing.
+Order, as esptool 5.x does it:
+
+1. After connect (USB Serial/JTAG only): RTC WDT off (unlock, CONFIG0 = 0, lock); super watchdog auto-feed
+   (SWD_WPROTECT = 0x8F1D312A, SWD_CONF bit 31, lock). S3: 0x600080B8/B4, C3: 0x600080B0/AC.
+2. S3 only: clear FORCE_DOWNLOAD_BOOT (OPTION1 0x6000812C, mask 0x1), else the chip boots into download mode again.
+   If GPIO0 is strapped low (GPIO_STRAP 0x60004038 bit 3 clear) or the bit stays set: RTS hard reset instead.
+3. WPROTECT = 0x50D83AA1 (unlock), CONFIG1 = 2000, CONFIG0 = 0xD0000102 (enable, stage 0 resets the chip),
+   WPROTECT = 0 (lock), wait 0.5 s.
+4. Reopen the port (same VID:PID) and read the boot log for 8 s; "Read boot log" repeats that.
+
+Other chips: the page says so and writes nothing.
 
 ## Browser support
 
@@ -32,11 +42,11 @@ Not detected: put the device in flashing mode by hand, see [TRMNL's guide](https
 
 ## Safety
 
-Never writes or erases flash, never touches eFuses. Only reads chip registers and writes the four RTC watchdog registers.
+Never writes or erases flash, never touches eFuses. Only reads chip registers and writes the RTC watchdog, super watchdog and force-download-boot registers.
 
 ## Development
 
-No build step. `npm test` (node --test) checks the register sequence per chip. Serve the folder with any static server.
+No build step. `npm test` (node --test) checks the register traffic per chip. Serve the folder with any static server.
 
 ## Licence
 

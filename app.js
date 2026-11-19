@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.7.0/bundle.js";
-import { USB_FILTERS, CHIPS, describeUsb, watchdogReset } from "./chips.js";
+import { USB_FILTERS, CHIPS, ESPRESSIF_VID, USB_JTAG_PID, describeUsb, disableWatchdogs, resetToApp } from "./chips.js";
 
 const $ = (id) => document.getElementById(id);
 const logEl = $("log");
@@ -27,6 +27,7 @@ function setButtons() {
   $("connect").disabled = busy;
   $("detect").disabled = busy || !port;
   $("reset").disabled = busy || !port;
+  $("bootlog").disabled = busy || !port;
 }
 
 async function connect() {
@@ -60,7 +61,7 @@ async function closeQuietly(transport) {
 }
 
 // After the reset the USB device can re-enumerate: wait for it, then read the boot log.
-async function readBootLines(ms = 4000) {
+async function readBootLines(ms = 8000) {
   const { usbVendorId: vid, usbProductId: pid } = port.getInfo();
   const deadline = Date.now() + 8000;
   let p = null;
@@ -79,7 +80,7 @@ async function readBootLines(ms = 4000) {
     if (!p) await new Promise((r) => setTimeout(r, 250));
   }
   if (!p) {
-    log("Port did not come back within 8 s; boot lines not read.", "warn");
+    log("Port did not come back within 8 s; press Read boot log once it is back.", "warn");
     return;
   }
   port = p;
@@ -125,8 +126,16 @@ async function run(withDetails) {
       await loader.after("hard_reset");
       return;
     }
-    log("RTC watchdog reset...");
-    await watchdogReset(loader, chip, log);
+    const info = port.getInfo();
+    if (info.usbVendorId === ESPRESSIF_VID && info.usbProductId === USB_JTAG_PID) {
+      log("USB Serial/JTAG: stopping the RTC WDT and auto-feeding the super watchdog (as esptool does)...");
+      await disableWatchdogs(loader, chip, log);
+    }
+    log("Leaving the bootloader: clear force-download, then RTC watchdog reset...");
+    if ((await resetToApp(loader, chip, log)) === "hard") {
+      log("Falling back to the RTS hard reset.", "warn");
+      await loader.after("hard_reset");
+    }
     await closeQuietly(transport);
     transport = null;
     await readBootLines();
@@ -147,6 +156,13 @@ if (!("serial" in navigator)) {
   $("connect").addEventListener("click", connect);
   $("detect").addEventListener("click", () => run(true));
   $("reset").addEventListener("click", () => run(false));
+  $("bootlog").addEventListener("click", async () => {
+    busy = true;
+    setButtons();
+    await readBootLines().catch((err) => log(`Error: ${err.message}`, "warn"));
+    busy = false;
+    setButtons();
+  });
   setButtons();
   log("Ready. Connect a TRMNL with a USB data cable.");
 }
