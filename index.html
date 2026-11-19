@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRMNL Debug</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>TRMNL Debug</h1>
+  <p>Finds a TRMNL (X: ESP32-S3, OG: ESP32-C3) over USB and restarts it with an RTC watchdog reset, the same reset as
+    <code>esptool --after watchdog-reset</code>. Useful for the X, which has no reset button.</p>
+  <p id="noserial" class="warn" hidden>This browser has no Web Serial. Use Chrome or Edge on a desktop computer.</p>
+  <div class="buttons">
+    <button id="connect">Connect</button>
+    <button id="detect" disabled>Detect</button>
+    <button id="reset" disabled>Watchdog reset</button>
+  </div>
+  <p id="found" class="found">No device chosen.</p>
+  <ul class="help">
+    <li><b>Detect</b>: enters the ROM bootloader, reads chip and MAC, then watchdog-resets back to the app.</li>
+    <li><b>Watchdog reset</b>: enters the ROM bootloader and watchdog-resets the chip.</li>
+  </ul>
+  <p class="safety">Safe by design: this page never writes or erases flash and never touches eFuses. It only reads
+    chip registers and writes the four RTC watchdog registers.</p>
+  <h2>Log</h2>
+  <div id="log" aria-live="polite"></div>
+  <footer>MIT. Uses <a href="https://github.com/espressif/esptool-js">esptool-js</a> 0.7.0 (Apache-2.0, vendored).</footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
