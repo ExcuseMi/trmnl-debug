@@ -9,7 +9,8 @@ A static web page that finds a TRMNL over USB and restarts it with an RTC watchd
 | Detect | ROM bootloader (esptool-js reset), chip name and MAC, then watchdog reset back to the app |
 | Watchdog reset | ROM bootloader, then watchdog reset |
 | Read boot log | Read the serial port for 8 s |
-| Serial monitor / Stop | Show everything the device sends; marks `boot:0x.. (DOWNLOAD...)` |
+| Serial monitor / Stop | Show everything the device sends; marks `boot:0x.. (DOWNLOAD...)`. Opens with DTR and RTS dropped at once; after a reset it keeps the port esptool-js had open |
+| Copy log | Copy the log text |
 
 After a reset the page reads the serial port for a few seconds and shows the boot lines; `rst:0x10 (RTCWDT_RTC_RST)`
 confirms the reset kind.
@@ -48,7 +49,7 @@ Never writes or erases flash, never touches eFuses. Only reads chip registers an
 
 ## Development
 
-No build step. `npm test` (node --test) checks the register traffic per chip. Serve the folder with any static server.
+No build step. `npm test` (node --test) checks the register traffic per chip and the monitor's open order on a fake port. Serve the folder with any static server.
 
 ## Licence
 

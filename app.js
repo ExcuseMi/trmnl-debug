@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-const PAGE_VERSION = "3 (strap fix, serial monitor)";
+const PAGE_VERSION = "4 (quiet monitor open, copy log)";
 import { ESPLoader, Transport } from "./vendor/esptool-js-0.7.0/bundle.js";
-import { USB_FILTERS, CHIPS, ESPRESSIF_VID, USB_JTAG_PID, describeUsb, disableWatchdogs, resetToApp } from "./chips.js?v=3";
+import { USB_FILTERS, CHIPS, ESPRESSIF_VID, USB_JTAG_PID, describeUsb, disableWatchdogs, resetToApp } from "./chips.js?v=4";
+import { SerialMonitor } from "./monitor.js?v=4";
 
 const $ = (id) => document.getElementById(id);
 const logEl = $("log");
@@ -24,60 +25,44 @@ const terminal = {
 
 const hex4 = (n) => (n ?? 0).toString(16).padStart(4, "0");
 
+const monitor = new SerialMonitor({
+  log,
+  getPorts: () => navigator.serial.getPorts(),
+  onChange: () => setButtons(),
+});
+
 function setButtons() {
-  $("connect").disabled = busy;
-  $("detect").disabled = busy || !port;
-  $("reset").disabled = busy || !port;
-  $("bootlog").disabled = busy || !port;
-  $("monitor").disabled = busy || !port;
-  $("monitorstop").disabled = !monitor;
+  const idle = !busy && !monitor.running;
+  $("connect").disabled = !idle;
+  $("detect").disabled = !idle || !port;
+  $("reset").disabled = !idle || !port;
+  $("bootlog").disabled = !idle || !port;
+  $("monitor").disabled = !port || busy || (monitor.running && !monitor.limited);
+  $("monitorstop").disabled = !monitor.running;
 }
 
-// Plain serial monitor: show everything that arrives until Stop.
-let monitor = null;
-const BOOT_DL = /boot:0x\w+ \(DOWNLOAD/i;
-const BOOT_OK = /boot:0x\w+ \(SPI_FAST_FLASH_BOOT\)/i;
-async function startMonitor() {
-  busy = true;
-  try {
-    await port.open({ baudRate: 115200 });
-  } catch (err) {
-    busy = false;
-    setButtons();
-    log(`Monitor: cannot open the port (${err.message})`, "warn");
+// Boot log (stopAfterMs) or open-ended monitor. A running boot log read becomes open-ended, same open port.
+async function watch(stopAfterMs = 0) {
+  if (monitor.running) {
+    if (!stopAfterMs) monitor.unlimit();
     return;
   }
-  const reader = port.readable.getReader();
-  monitor = { reader };
-  setButtons();
-  log("Monitor: open at 115200. Stop to end.", "ok");
-  const dec = new TextDecoder();
-  let pending = "";
-  const show = (l) => {
-    if (!l.trim()) return;
-    const cls = BOOT_DL.test(l) ? "warn" : BOOT_OK.test(l) || /rst:0x\w+ \(RTC_?WDT/i.test(l) ? "ok" : "boot";
-    log(`| ${l}`, cls);
-    if (BOOT_DL.test(l)) log("The chip booted into DOWNLOAD mode (ROM bootloader), not the app.", "warn");
-  };
+  const p = await monitor.start(port, { stopAfterMs });
+  if (p) port = p;
+}
+
+async function copyLog() {
+  const text = logEl.innerText;
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      pending += dec.decode(value, { stream: true });
-      const parts = pending.split(/\r?\n/);
-      pending = parts.pop();
-      parts.forEach(show);
-    }
-  } catch (err) {
-    log(`Monitor: port closed (${err.message})`, "warn");
+    await navigator.clipboard.writeText(text);
+    log(`Log copied (${text.split("\n").length} lines).`, "ok");
+  } catch {
+    const r = document.createRange();
+    r.selectNodeContents(logEl);
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+    log("Clipboard blocked: log selected, press Ctrl+C.", "warn");
   }
-  show(pending);
-  reader.releaseLock();
-  await port.close().catch(() => {});
-  monitor = null;
-  busy = false;
-  setButtons();
-  log("Monitor stopped.");
 }
 
 async function connect() {
@@ -110,57 +95,22 @@ async function closeQuietly(transport) {
   }
 }
 
-// After the reset the USB device can re-enumerate: wait for it, then read the boot log.
-async function readBootLines(ms = 8000) {
-  const { usbVendorId: vid, usbProductId: pid } = port.getInfo();
-  const deadline = Date.now() + 8000;
-  let p = null;
-  while (!p && Date.now() < deadline) {
-    for (const cand of await navigator.serial.getPorts()) {
-      const i = cand.getInfo();
-      if (i.usbVendorId !== vid || i.usbProductId !== pid) continue;
-      try {
-        await cand.open({ baudRate: 115200 });
-        p = cand;
-        break;
-      } catch {
-        /* not back yet */
-      }
-    }
-    if (!p) await new Promise((r) => setTimeout(r, 250));
-  }
-  if (!p) {
-    log("Port did not come back within 8 s; press Read boot log once it is back.", "warn");
-    return;
-  }
-  port = p;
-  log(`Reading the serial port for ${ms / 1000} s...`);
-  const reader = p.readable.getReader();
-  const dec = new TextDecoder();
-  let text = "";
-  const stop = setTimeout(() => reader.cancel().catch(() => {}), ms);
+// Hand the open port over from esptool-js without closing it: closing and reopening toggles DTR/RTS,
+// which on USB Serial/JTAG can reset the chip again.
+async function releaseTransport(transport) {
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      text += dec.decode(value, { stream: true });
-    }
+    if (port.readable && port.readable.locked && transport.reader) await transport.reader.cancel();
+    await transport.waitForUnlock(400);
   } catch {
-    /* cancelled or device gone */
+    /* port gone after the reset: the monitor reopens it */
   }
-  clearTimeout(stop);
-  reader.releaseLock();
-  await p.close().catch(() => {});
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (!lines.length) log("No boot output seen (the ROM lines can be gone before the port reopens).", "warn");
-  for (const l of lines) log(`| ${l}`, /rst:0x\w+ \(RTC_?WDT/i.test(l) ? "ok" : "boot");
-  if (lines.some((l) => /rst:0x\w+ \(RTC_?WDT/i.test(l))) log("Reset kind confirmed: RTC watchdog.", "ok");
 }
 
 async function run(withDetails) {
   busy = true;
   setButtons();
   let transport = null;
+  let didReset = false;
   try {
     const opened = await openLoader();
     transport = opened.transport;
@@ -187,9 +137,9 @@ async function run(withDetails) {
       log("Falling back to the RTS hard reset.", "warn");
       await loader.after("hard_reset");
     }
-    await closeQuietly(transport);
+    await releaseTransport(transport);
     transport = null;
-    await readBootLines();
+    didReset = true;
   } catch (err) {
     log(`Error: ${err.message}`, "warn");
   } finally {
@@ -197,6 +147,7 @@ async function run(withDetails) {
     busy = false;
     setButtons();
   }
+  if (didReset) await watch(8000);
 }
 
 if (!("serial" in navigator)) {
@@ -207,15 +158,10 @@ if (!("serial" in navigator)) {
   $("connect").addEventListener("click", connect);
   $("detect").addEventListener("click", () => run(true));
   $("reset").addEventListener("click", () => run(false));
-  $("monitor").addEventListener("click", startMonitor);
-  $("monitorstop").addEventListener("click", () => monitor && monitor.reader.cancel().catch(() => {}));
-  $("bootlog").addEventListener("click", async () => {
-    busy = true;
-    setButtons();
-    await readBootLines().catch((err) => log(`Error: ${err.message}`, "warn"));
-    busy = false;
-    setButtons();
-  });
+  $("copylog").addEventListener("click", copyLog);
+  $("monitor").addEventListener("click", () => watch(0));
+  $("monitorstop").addEventListener("click", () => monitor.stop());
+  $("bootlog").addEventListener("click", () => watch(8000));
   setButtons();
   log(`Ready (page version ${PAGE_VERSION}). Connect a TRMNL with a USB data cable.`);
 }
