@@ -28,6 +28,8 @@ Web Serial only: Chrome or Edge on desktop (Windows, macOS, Linux, ChromeOS). No
 
 On a Windows PC that shares the device with WSL: detach it first (`usbipd detach --busid <id>`) so Windows owns the port.
 
+Not detected: put the device in flashing mode by hand, see [TRMNL's guide](https://help.trmnl.com/en/articles/11936721-put-your-trmnl-in-flashing-mode#h_96e07a072e).
+
 ## Safety
 
 Never writes or erases flash, never touches eFuses. Only reads chip registers and writes the four RTC watchdog registers.
